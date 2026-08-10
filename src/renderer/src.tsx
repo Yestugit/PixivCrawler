@@ -10,7 +10,7 @@ const statusText: Record<TaskRecord['status'], string> = {
 const initialFilters: DownloadFilter = { types: ['illust', 'manga', 'ugoira'], includeTags: [], excludeTags: [], bookmarkVisibility: 'both', ai: 'include', age: 'all', minBookmarks: 0, minViews: 0, minLikes: 0 }
 
 function App(): React.JSX.Element {
-  const [page, setPage] = useState<'tasks' | 'create' | 'history' | 'settings'>('tasks')
+  const [page, setPage] = useState<'tasks' | 'create' | 'history' | 'settings' | 'about'>('tasks')
   const [auth, setAuth] = useState<AuthStatus>({ loggedIn: false })
   const [tasks, setTasks] = useState<TaskRecord[]>([])
   const [settings, setSettings] = useState<Settings>()
@@ -38,6 +38,7 @@ function App(): React.JSX.Element {
         <Nav active={page === 'create'} onClick={() => setPage('create')} icon="＋">新建任务</Nav>
         <Nav active={page === 'history'} onClick={() => setPage('history')} icon="↺">下载历史</Nav>
         <Nav active={page === 'settings'} onClick={() => setPage('settings')} icon="⚙">设置</Nav>
+        <Nav active={page === 'about'} onClick={() => setPage('about')} icon="ⓘ">关于</Nav>
       </nav>
       <div className="account-card">
         <span className={`dot ${auth.loggedIn ? 'online' : ''}`} />
@@ -51,6 +52,7 @@ function App(): React.JSX.Element {
       {page === 'history' && <Tasks title="下载历史" subtitle="查看已经完成的归档任务；取消的空任务不会显示在这里。" tasks={history} empty="暂无下载历史" />}
       {page === 'create' && <CreateTask auth={auth} onCreated={(task) => { setTasks((t) => [task, ...t]); setPage('tasks') }} onError={setError} />}
       {page === 'settings' && settings && <SettingsPage value={settings} onChange={setSettings} onError={setError} />}
+      {page === 'about' && <AboutPage />}
     </main>
     {settings && !settings.acceptedNotice && <Notice settings={settings} onAccepted={(value) => setSettings(value)} />}
   </div>
@@ -139,6 +141,30 @@ function SettingsPage({ value, onChange, onError }: { value: Settings; onChange(
     <h3>更新</h3><label>GitHub 仓库<input value={draft.githubRepo} onChange={(e) => setDraft({ ...draft, githubRepo: e.target.value })} placeholder="owner/repository（留空则隐藏更新功能）" /></label>{draft.githubRepo && <button className="secondary compact" onClick={() => void updates()}>检查更新</button>}
     {result && <p className="result">{result}</p>}<div className="actions"><button className="primary" onClick={() => void save()}>保存设置</button></div>
   </div></section>
+}
+
+function AboutPage(): React.JSX.Element {
+  const open = (url: string): void => { void window.pixivCrawler.app.openPath(url) }
+  return <section><Header title="关于 PixivCrawler" subtitle="个人使用的 Pixiv 作品本地归档工具。" />
+    <div className="panel about-panel">
+      <div className="about-intro"><div className="brand-mark about-mark">P</div><div><h2>PixivCrawler</h2><p>下载并整理当前 Pixiv 账号有权正常查看的作品，支持断点续传、任务恢复和作品元数据归档。</p></div></div>
+      <h3>第一次使用</h3><ol className="guide-list">
+        <li><strong>登录 Pixiv</strong><span>点击左下角“登录”，在独立窗口中手动完成密码、验证码或两步验证。</span></li>
+        <li><strong>新建下载任务</strong><span>选择作品链接、搜索作品、作者作品或我的收藏，并填写来源。</span></li>
+        <li><strong>设置筛选条件</strong><span>可以按类型、日期、标签、AI 标记和年龄分级筛选；主题搜索还能设置最低收藏、浏览和点赞数，最多下载 100 张图片。</span></li>
+        <li><strong>预览并开始</strong><span>先检查匹配数量，再创建任务。任务支持暂停、继续、取消和失败重试。</span></li>
+        <li><strong>查看文件</strong><span>在“设置”中查看或修改下载根目录；每个作品会保存图片和 artwork.json 元数据。</span></li>
+      </ol>
+      <h3>四种下载方式</h3><div className="about-grid">
+        <article><strong>作品链接</strong><p>粘贴一个或多个作品链接/ID，适合精确下载。</p></article>
+        <article><strong>搜索作品</strong><p>输入主题、标签、中文译名，或直接粘贴 Pixiv 标签页链接。</p></article>
+        <article><strong>作者作品</strong><p>输入作者主页链接/ID，批量归档筛选后的作品。</p></article>
+        <article><strong>我的收藏</strong><p>归档当前账号的公开或非公开收藏。</p></article>
+      </div>
+      <h3>使用说明</h3><p className="about-note">本工具不会绕过登录、验证码、年龄/地区限制或作品权限。请仅用于个人本地归档，尊重作者版权、Pixiv 服务条款和所在地法律；不要擅自转载或用于侵权用途。</p>
+      <div className="about-actions"><button className="secondary" onClick={() => open('https://github.com/Yestugit/PixivCrawler')}>GitHub 项目主页</button><button className="primary" onClick={() => open('https://github.com/Yestugit/PixivCrawler/releases')}>下载最新版本</button></div>
+    </div>
+  </section>
 }
 
 function Notice({ settings, onAccepted }: { settings: Settings; onAccepted(value: Settings): void }): React.JSX.Element {

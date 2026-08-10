@@ -6,6 +6,9 @@ Electron 登录会话，只访问当前账号能够正常查看的作品，并�
 浏览数和点赞数筛选，并将下载数量限制为最多 100 张图片；中文等译名精确命中 Pixiv 官方标签候选时，
 会自动使用对应的主标签搜索。
 
+应用内“关于”页面提供首次使用步骤、四种下载方式、筛选说明、文件位置和使用边界，并可直接打开
+GitHub 项目主页与 Release 下载页。
+
 ## 下载
 
 - [下载安装版（Windows x64）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.1.0/PixivCrawler-0.1.0-x64.exe)
