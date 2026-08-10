@@ -1,0 +1,7 @@
+{
+  "releaseTag": "autobuild-2026-08-09-13-03",
+  "archiveName": "ffmpeg-n8.1.2-34-g9b6c8969e0-win64-lgpl-shared-8.1.zip",
+  "sha256": "2936e5449886641b4279ca3fc554b678c8e9a2d20dd0c0a34fe7208b254a0905",
+  "source": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-09-13-03/ffmpeg-n8.1.2-34-g9b6c8969e0-win64-lgpl-shared-8.1.zip",
+  "fetchedAt": "2026-08-10T09:34:16.587Z"
+}

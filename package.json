@@ -1,0 +1,51 @@
+{
+  "name": "pixiv-crawler",
+  "version": "0.1.0",
+  "description": "A Windows desktop archiver for Pixiv artworks you can access.",
+  "main": "out/main/index.js",
+  "author": "PixivCrawler contributors",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && playwright test",
+    "fetch:ffmpeg": "node scripts/fetch-ffmpeg.mjs",
+    "package:win": "npm run fetch:ffmpeg && npm run build && electron-builder --win nsis zip --x64",
+    "postinstall": "node -e \"console.log('Dependencies ready')\""
+  },
+  "dependencies": {
+    "@electron-toolkit/utils": "^4.0.0",
+    "nanoid": "^5.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "unzipper": "^0.12.5",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@playwright/test": "^1.54.0",
+    "@vitejs/plugin-react": "^4.6.0",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.0.0",
+    "electron-vite": "^4.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.0"
+  },
+  "build": {
+    "appId": "io.github.pixivcrawler",
+    "productName": "PixivCrawler",
+    "asar": true,
+    "files": ["out/**/*", "package.json", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+    "extraResources": [{ "from": "resources/ffmpeg", "to": "ffmpeg" }],
+    "directories": { "output": "release" },
+    "win": { "target": ["nsis", "zip"], "artifactName": "${productName}-${version}-${arch}.${ext}" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true }
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+out/
+release/
+coverage/
+*.log
+*.part
+.env
+.e2e-data/
+test-results/
+playwright-report/
+resources/ffmpeg/bin/
+resources/ffmpeg/*.zip
