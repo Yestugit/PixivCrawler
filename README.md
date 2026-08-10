@@ -2,7 +2,13 @@
 
 PixivCrawler 是面向 Windows 10/11 x64 的个人 Pixiv 作品归档工具。它使用独立的
 Electron 登录会话，只访问当前账号能够正常查看的作品，并提供作品链接、作者作品和
-当前账号收藏三种下载入口。
+当前账号收藏和关键词搜索四种下载入口。
+
+## 下载
+
+- [下载安装版（Windows x64）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.1.0/PixivCrawler-0.1.0-x64.exe)
+- [下载免安装版（Windows x64 ZIP）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.1.0/PixivCrawler-0.1.0-x64.zip)
+- [查看全部 Releases](https://github.com/Yestugit/PixivCrawler/releases)
 
 ## 开发
 

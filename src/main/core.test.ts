@@ -6,6 +6,7 @@ import { AppDatabase } from './database'
 import { buildUgoiraConcat } from './downloader'
 import { matchesArtwork } from './pixiv'
 import type { CreateTaskInput, PixivArtwork } from '../shared/contracts'
+import { SourceSchema } from '../shared/contracts'
 
 const temporary: string[] = []
 afterEach(() => { for (const dir of temporary.splice(0)) fs.rmSync(dir, { recursive: true, force: true }) })
@@ -21,6 +22,11 @@ const artwork: PixivArtwork = {
 }
 
 describe('core persistence and filtering', () => {
+  it('validates keyword search sources and result limits', () => {
+    expect(SourceSchema.parse({ kind: 'search', value: '风景' })).toMatchObject({ maxResults: 100 })
+    expect(() => SourceSchema.parse({ kind: 'search', value: '', maxResults: 100 })).toThrow()
+    expect(() => SourceSchema.parse({ kind: 'search', value: '风景', maxResults: 1001 })).toThrow()
+  })
   it('migrates the database and pauses interrupted work', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pixiv-crawler-')); temporary.push(dir)
     const file = path.join(dir, 'test.sqlite3')

@@ -12,6 +12,12 @@ const artworkSchema = z.object({
 })
 const pagesSchema = z.array(z.object({ urls: z.object({ original: z.string() }), width: z.number().optional(), height: z.number().optional() }))
 const ugoiraSchema = z.object({ originalSrc: z.string(), frames: z.array(z.object({ file: z.string(), delay: z.number() })) })
+const searchSchema = z.object({
+  illustManga: z.object({
+    data: z.array(z.object({ id: z.coerce.string() })),
+    total: z.number()
+  })
+})
 
 export class PixivError extends Error { constructor(message: string, readonly code: 'auth' | 'not-found' | 'rate-limit' | 'adapter' | 'network') { super(message) } }
 
@@ -53,6 +59,8 @@ export class PixivClient {
     if (source.kind === 'artworks') {
       ids = source.values.map(parseArtworkId).filter((id): id is string => Boolean(id))
       if (ids.length !== source.values.length) throw new PixivError('包含无效的 Pixiv 作品链接或 ID', 'adapter')
+    } else if (source.kind === 'search') {
+      ids = await this.searchIds(source.value, source.maxResults, signal)
     } else if (source.kind === 'author') {
       const userId = parseUserId(source.value)
       if (!userId) throw new PixivError('作者链接或 ID 无效', 'adapter')
@@ -93,6 +101,21 @@ export class PixivClient {
     const body = z.object({ illusts: z.record(z.string(), z.unknown()).nullable().optional(), manga: z.record(z.string(), z.unknown()).nullable().optional() })
       .parse(await this.getBody(`/ajax/user/${userId}/profile/all?lang=zh`, signal))
     return [...Object.keys(body.illusts ?? {}), ...Object.keys(body.manga ?? {})]
+  }
+  private async searchIds(keyword: string, maxResults: number, signal?: AbortSignal): Promise<string[]> {
+    const ids: string[] = []
+    const word = keyword.trim()
+    const encoded = encodeURIComponent(word)
+    for (let page = 1; ids.length < maxResults; page++) {
+      const query = new URLSearchParams({ word, order: 'date_d', mode: 'all', p: String(page), s_mode: 's_tag', type: 'all', lang: 'zh' })
+      const parsed = searchSchema.safeParse(await this.getBody(`/ajax/search/artworks/${encoded}?${query}`, signal))
+      if (!parsed.success) throw new PixivError('Pixiv 搜索接口结构已变化，请更新站点适配器', 'adapter')
+      const body = parsed.data
+      const batch = body.illustManga.data.map((work) => work.id)
+      ids.push(...batch.slice(0, maxResults - ids.length))
+      if (batch.length === 0 || ids.length >= body.illustManga.total) break
+    }
+    return ids
   }
   private async bookmarkIds(userId: string, visibility: 'show' | 'hide' | 'both', signal?: AbortSignal): Promise<string[]> {
     const ids: string[] = []

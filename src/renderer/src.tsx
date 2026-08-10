@@ -82,13 +82,14 @@ function Tasks({ title, subtitle, tasks, empty }: { title: string; subtitle: str
 function CreateTask({ auth, onCreated, onError }: { auth: AuthStatus; onCreated(task: TaskRecord): void; onError(value: string): void }): React.JSX.Element {
   const [kind, setKind] = useState<DownloadSource['kind']>('artworks')
   const [value, setValue] = useState('')
+  const [maxResults, setMaxResults] = useState(100)
   const [filters, setFilters] = useState<DownloadFilter>(initialFilters)
   const [force, setForce] = useState(false)
   const [preview, setPreview] = useState<PreviewResult>()
   const [busy, setBusy] = useState(false)
   const input = useMemo<CreateTaskInput>(() => ({
-    source: kind === 'artworks' ? { kind, values: value.split(/\r?\n|,/).map((v) => v.trim()).filter(Boolean) } : kind === 'author' ? { kind, value: value.trim() } : { kind }, filters, force
-  }), [kind, value, filters, force])
+    source: kind === 'artworks' ? { kind, values: value.split(/\r?\n|,/).map((v) => v.trim()).filter(Boolean) } : kind === 'search' ? { kind, value: value.trim(), maxResults } : kind === 'author' ? { kind, value: value.trim() } : { kind }, filters, force
+  }), [kind, value, maxResults, filters, force])
   const execute = async (mode: 'preview' | 'create'): Promise<void> => {
     setBusy(true); onError('')
     try {
@@ -99,9 +100,10 @@ function CreateTask({ auth, onCreated, onError }: { auth: AuthStatus; onCreated(
   }
   return <section><Header title="新建下载任务" subtitle="先预览匹配结果，再加入可暂停、可恢复的下载队列。" />
     <div className="panel"><h3>下载来源</h3><div className="segmented">
-      {([['artworks', '作品链接'], ['author', '作者作品'], ['bookmarks', '我的收藏']] as const).map(([id, label]) => <button className={kind === id ? 'selected' : ''} onClick={() => { setKind(id); setPreview(undefined) }} key={id}>{label}</button>)}
+      {([['artworks', '作品链接'], ['search', '搜索作品'], ['author', '作者作品'], ['bookmarks', '我的收藏']] as const).map(([id, label]) => <button className={kind === id ? 'selected' : ''} onClick={() => { setKind(id); setValue(''); setPreview(undefined) }} key={id}>{label}</button>)}
     </div>
-    {kind !== 'bookmarks' && <label>{kind === 'artworks' ? '作品链接或 ID（每行一个）' : '作者链接或 ID'}<textarea rows={kind === 'artworks' ? 5 : 2} value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === 'artworks' ? 'https://www.pixiv.net/artworks/123456' : 'https://www.pixiv.net/users/123456'} /></label>}
+    {kind !== 'bookmarks' && <label>{kind === 'artworks' ? '作品链接或 ID（每行一个）' : kind === 'search' ? '搜索关键词' : '作者链接或 ID'}<textarea rows={kind === 'artworks' ? 5 : 2} value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === 'artworks' ? 'https://www.pixiv.net/artworks/123456' : kind === 'search' ? '输入作品标签或关键词' : 'https://www.pixiv.net/users/123456'} /></label>}
+    {kind === 'search' && <label>最多获取作品数<input type="number" min="1" max="1000" value={maxResults} onChange={(e) => setMaxResults(Math.max(1, Math.min(1000, Number(e.target.value) || 1)))} /></label>}
     <h3>筛选条件</h3><div className="form-grid">
       <label>作品类型<div className="checks">{(['illust', 'manga', 'ugoira'] as const).map((type) => <label key={type}><input type="checkbox" checked={filters.types.includes(type)} onChange={() => setFilters({ ...filters, types: filters.types.includes(type) ? filters.types.filter((t) => t !== type) : [...filters.types, type] })} />{{ illust: '插画', manga: '漫画', ugoira: '动图' }[type]}</label>)}</div></label>
       <label>年龄分级<select value={filters.age} onChange={(e) => setFilters({ ...filters, age: e.target.value as DownloadFilter['age'] })}><option value="all">全部可见作品</option><option value="safe">仅全年龄</option><option value="r18">仅 R-18 / R-18G</option></select></label>
@@ -139,8 +141,8 @@ function Notice({ settings, onAccepted }: { settings: Settings; onAccepted(value
 }
 
 function Header({ title, subtitle }: { title: string; subtitle: string }): React.JSX.Element { return <header className="page-header"><h1>{title}</h1><p>{subtitle}</p></header> }
-function Empty({ text }: { text: string }): React.JSX.Element { return <div className="empty"><span>◎</span><h3>{text}</h3><p>可以从“新建任务”添加作品链接、作者或收藏。</p></div> }
-function sourceName(source: DownloadSource): string { return source.kind === 'artworks' ? `${source.values.length} 个作品` : source.kind === 'author' ? `作者 ${source.value}` : '我的收藏' }
+function Empty({ text }: { text: string }): React.JSX.Element { return <div className="empty"><span>◎</span><h3>{text}</h3><p>可以从“新建任务”添加作品链接、关键词搜索、作者或收藏。</p></div> }
+function sourceName(source: DownloadSource): string { return source.kind === 'artworks' ? `${source.values.length} 个作品` : source.kind === 'search' ? `搜索：${source.value}` : source.kind === 'author' ? `作者 ${source.value}` : '我的收藏' }
 function formatTime(value: string): string { return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) }
 function tags(value: string): string[] { return value.split(/[,，]/).map((v) => v.trim()).filter(Boolean) }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
