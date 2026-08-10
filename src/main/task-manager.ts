@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import type { CreateTaskInput, PreviewResult, TaskRecord } from '../shared/contracts'
+import type { CreateTaskInput, PreviewResult, ResolveProgress, TaskRecord } from '../shared/contracts'
 import type { AppDatabase } from './database'
 import type { PixivClient } from './pixiv'
 import { PixivError } from './pixiv'
@@ -44,8 +44,19 @@ export class TaskManager {
       if (!task) return
       let pending = this.db.listPendingItems(id)
       if (task.total === 0 || pending.length === 0 && task.completed === 0) {
-        this.change(id, { status: 'resolving', message: '正在解析来源' })
-        const works = await this.pixiv.resolveSource(task.source, task.filters, controller.signal)
+        this.change(id, { status: 'resolving', message: '正在解析来源', inspectedCandidates: 0, candidateTotal: 0, matchedImages: 0 })
+        let latestProgress: ResolveProgress | undefined
+        let lastProgressAt = 0
+        const reportProgress = (progress: ResolveProgress): void => {
+          latestProgress = progress
+          if (controller.signal.aborted || Date.now() - lastProgressAt < 250) return
+          lastProgressAt = Date.now()
+          this.change(id, { ...progress, message: `已检查 ${progress.inspectedCandidates}/${progress.candidateTotal}、匹配 ${progress.matchedImages} 张` })
+        }
+        const works = await this.pixiv.resolveSource(task.source, task.filters, controller.signal, reportProgress)
+        if (latestProgress && !controller.signal.aborted) {
+          this.change(id, { ...latestProgress, message: `已检查 ${latestProgress.inspectedCandidates}/${latestProgress.candidateTotal}、匹配 ${latestProgress.matchedImages} 张` })
+        }
         for (const work of works) this.db.saveArtwork(work)
         this.db.addItems(id, works.map((w) => w.id))
         pending = works.map((w) => w.id)
@@ -72,8 +83,9 @@ export class TaskManager {
       if (!artworkId) return
       try {
         const task = this.db.getTask(taskId)!
-        const artwork = await this.pixiv.getArtwork(artworkId, signal)
-        this.db.saveArtwork(artwork)
+        const cached = this.db.getArtwork(artworkId)
+        const artwork = cached ?? await this.pixiv.getArtwork(artworkId, signal)
+        if (!cached) this.db.saveArtwork(artwork)
         await this.downloader.download(artwork, this.settings.get().downloadRoot, task.force, signal, (progress) => {
           this.change(taskId, { status: artwork.type === 'ugoira' && progress.done === progress.total ? 'converting' : 'downloading', message: `${artwork.title}：${progress.message}` })
         })

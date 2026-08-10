@@ -39,7 +39,7 @@ export type CreateTaskInput = z.infer<typeof CreateTaskSchema>
 export const SettingsSchema = z.object({
   downloadRoot: z.string().min(1),
   concurrency: z.number().int().min(1).max(4),
-  requestIntervalMs: z.number().int().min(1000).max(10000),
+  requestIntervalMs: z.number().int().min(500).max(10000),
   proxyMode: z.enum(['system', 'custom']),
   proxyUrl: z.string(),
   acceptedNotice: z.boolean(),
@@ -61,11 +61,16 @@ export interface TaskRecord {
   total: number
   completed: number
   failed: number
+  inspectedCandidates: number
+  candidateTotal: number
+  matchedImages: number
   message: string
   force: boolean
   createdAt: string
   updatedAt: string
 }
+
+export interface ResolveProgress { inspectedCandidates: number; candidateTotal: number; matchedImages: number }
 
 export interface PreviewResult { count: number; imageCount: number; sample: ArtworkSummary[]; warnings: string[] }
 export interface ArtworkSummary { id: string; title: string; authorName: string; type: 'illust' | 'manga' | 'ugoira' }

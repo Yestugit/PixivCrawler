@@ -23,12 +23,20 @@ export class SettingsStore {
   constructor(private readonly db: AppDatabase) {}
   get(): Settings {
     const raw = this.db.getSetting('app')
+    const speedMigrated = this.db.getSetting('speed-profile-v2') === '1'
     const defaults: Settings = {
-      downloadRoot: defaultDownloadRoot(), concurrency: 2, requestIntervalMs: 2000,
+      downloadRoot: defaultDownloadRoot(), concurrency: 4, requestIntervalMs: 500,
       proxyMode: 'system', proxyUrl: '', acceptedNotice: false, githubRepo: import.meta.env?.VITE_GITHUB_REPO ?? ''
     }
-    if (!raw) return defaults
-    const parsed = SettingsSchema.safeParse({ ...defaults, ...JSON.parse(raw) })
+    if (!raw) { if (!speedMigrated) this.db.setSetting('speed-profile-v2', '1'); return defaults }
+    const saved = JSON.parse(raw) as Partial<Settings>
+    if (!speedMigrated && saved.concurrency === 2 && saved.requestIntervalMs === 2000) {
+      saved.concurrency = 4
+      saved.requestIntervalMs = 500
+      this.db.setSetting('app', JSON.stringify(saved))
+    }
+    if (!speedMigrated) this.db.setSetting('speed-profile-v2', '1')
+    const parsed = SettingsSchema.safeParse({ ...defaults, ...saved })
     return parsed.success ? parsed.data : defaults
   }
   set(value: Settings): Settings {

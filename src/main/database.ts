@@ -19,6 +19,9 @@ export class AppDatabase {
         id TEXT PRIMARY KEY, source_json TEXT NOT NULL, filters_json TEXT NOT NULL,
         status TEXT NOT NULL, total INTEGER NOT NULL DEFAULT 0,
         completed INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
+        inspected_candidates INTEGER NOT NULL DEFAULT 0,
+        candidate_total INTEGER NOT NULL DEFAULT 0,
+        matched_images INTEGER NOT NULL DEFAULT 0,
         message TEXT NOT NULL DEFAULT '', force INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
@@ -36,6 +39,15 @@ export class AppDatabase {
       );
       INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);
     `)
+    const hasVersion2 = this.db.prepare('SELECT 1 FROM schema_migrations WHERE version = 2').get()
+    if (!hasVersion2) {
+      const columns = this.db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]
+      const names = new Set(columns.map((column) => column.name))
+      if (!names.has('inspected_candidates')) this.db.exec('ALTER TABLE tasks ADD COLUMN inspected_candidates INTEGER NOT NULL DEFAULT 0')
+      if (!names.has('candidate_total')) this.db.exec('ALTER TABLE tasks ADD COLUMN candidate_total INTEGER NOT NULL DEFAULT 0')
+      if (!names.has('matched_images')) this.db.exec('ALTER TABLE tasks ADD COLUMN matched_images INTEGER NOT NULL DEFAULT 0')
+      this.db.prepare('INSERT INTO schema_migrations(version) VALUES (2)').run()
+    }
     this.db.prepare(`UPDATE tasks SET status = 'paused', message = '应用上次退出，任务已暂停' WHERE status IN ('resolving','queued','downloading','converting')`).run()
   }
 
@@ -58,12 +70,13 @@ export class AppDatabase {
   listTasks(): TaskRecord[] {
     return (this.db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as Record<string, unknown>[]).map((r) => this.mapTask(r))
   }
-  updateTask(id: string, patch: Partial<Pick<TaskRecord, 'status' | 'total' | 'completed' | 'failed' | 'message'>>): TaskRecord {
+  updateTask(id: string, patch: Partial<Pick<TaskRecord, 'status' | 'total' | 'completed' | 'failed' | 'message' | 'inspectedCandidates' | 'candidateTotal' | 'matchedImages'>>): TaskRecord {
     const current = this.getTask(id)
     if (!current) throw new Error('任务不存在')
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() }
-    this.db.prepare(`UPDATE tasks SET status=?,total=?,completed=?,failed=?,message=?,updated_at=? WHERE id=?`).run(
-      next.status, next.total, next.completed, next.failed, next.message, next.updatedAt, id)
+    this.db.prepare(`UPDATE tasks SET status=?,total=?,completed=?,failed=?,message=?,inspected_candidates=?,candidate_total=?,matched_images=?,updated_at=? WHERE id=?`).run(
+      next.status, next.total, next.completed, next.failed, next.message, next.inspectedCandidates,
+      next.candidateTotal, next.matchedImages, next.updatedAt, id)
     return next
   }
   addItems(taskId: string, ids: string[]): void {
@@ -81,6 +94,10 @@ export class AppDatabase {
   saveArtwork(artwork: PixivArtwork): void {
     this.db.prepare(`INSERT INTO artworks(id,json,updated_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json,updated_at=excluded.updated_at`).run(artwork.id, JSON.stringify(artwork), new Date().toISOString())
   }
+  getArtwork(id: string): PixivArtwork | undefined {
+    const row = this.db.prepare('SELECT json FROM artworks WHERE id=?').get(id) as { json: string } | undefined
+    return row ? JSON.parse(row.json) as PixivArtwork : undefined
+  }
   recordFile(artworkId: string, page: number, format: string, path: string, size: number): void {
     this.db.prepare(`INSERT INTO files(artwork_id,page_index,format,path,size,completed_at) VALUES(?,?,?,?,?,?)
       ON CONFLICT(artwork_id,page_index,format) DO UPDATE SET path=excluded.path,size=excluded.size,completed_at=excluded.completed_at`).run(
@@ -97,6 +114,7 @@ export class AppDatabase {
       id: String(row.id), source: SourceSchema.parse(JSON.parse(String(row.source_json))),
       filters: FilterSchema.parse(JSON.parse(String(row.filters_json))), status: TaskStatusSchema.parse(row.status) as TaskStatus,
       total: Number(row.total), completed: Number(row.completed), failed: Number(row.failed), message: String(row.message),
+      inspectedCandidates: Number(row.inspected_candidates), candidateTotal: Number(row.candidate_total), matchedImages: Number(row.matched_images),
       force: Boolean(row.force), createdAt: String(row.created_at), updatedAt: String(row.updated_at)
     }
   }

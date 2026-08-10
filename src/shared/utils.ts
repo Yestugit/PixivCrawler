@@ -1,4 +1,12 @@
+import type { TaskRecord } from './contracts'
+
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
+
+export function upsertTask(tasks: TaskRecord[], task: TaskRecord): TaskRecord[] {
+  return [task, ...tasks.filter((item) => item.id !== task.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+
+export function uniqueTasks(tasks: TaskRecord[]): TaskRecord[] { return tasks.reduce(upsertTask, [] as TaskRecord[]) }
 
 export function sanitizeSegment(value: string, fallback = 'untitled', max = 80): string {
   let result = value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/g, '').trim()
@@ -49,6 +57,7 @@ export function retryDelay(attempt: number, status?: number, retryAfter?: string
 }
 
 export function jitter(ms: number, random = Math.random): number { return Math.round(ms * (0.75 + random() * 0.5)) }
+export function upperJitter(ms: number, random = Math.random): number { return Math.round(ms * (1 + random() * 0.25)) }
 
 export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolve, reject) => {

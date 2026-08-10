@@ -37,7 +37,7 @@ app.whenReady().then(async () => {
   database = new AppDatabase(path.join(app.getPath('userData'), 'pixiv-crawler.sqlite3'))
   const settings = new SettingsStore(database)
   const auth = new AuthService()
-  const pixiv = new PixivClient(auth, () => settings.get().requestIntervalMs)
+  const pixiv = new PixivClient(auth, () => settings.get().requestIntervalMs, () => settings.get().concurrency)
   await pixiv.configureProxy(settings.get().proxyMode, settings.get().proxyUrl)
   const downloader = new ArtworkDownloader(auth.session, database)
   const tasks = new TaskManager(database, pixiv, downloader, settings, (task) => sendTaskProgress(mainWindow!, task))
