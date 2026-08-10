@@ -11,8 +11,8 @@ GitHub 项目主页与 Release 下载页。
 
 ## 下载
 
-- [下载安装版（Windows x64）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.2.0/PixivCrawler-0.2.0-x64.exe)
-- [下载免安装版（Windows x64 ZIP）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.2.0/PixivCrawler-0.2.0-x64.zip)
+- [下载安装版（Windows x64）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.2.1/PixivCrawler-0.2.1-x64.exe)
+- [下载免安装版（Windows x64 ZIP）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.2.1/PixivCrawler-0.2.1-x64.zip)
 - [查看全部 Releases](https://github.com/Yestugit/PixivCrawler/releases)
 
 ## 开发

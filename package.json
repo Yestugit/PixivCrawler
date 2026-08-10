@@ -1,6 +1,6 @@
 {
   "name": "pixiv-crawler",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A Windows desktop archiver for Pixiv artworks you can access.",
   "main": "out/main/index.js",
   "author": "PixivCrawler contributors",
