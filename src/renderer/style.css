@@ -29,6 +29,7 @@ input, textarea, select { width: 100%; border: 1px solid #ddd5d0; border-radius:
 input:focus, textarea:focus, select:focus { border-color: #df7386; box-shadow: 0 0 0 3px #df73861a; } textarea { resize: vertical; line-height: 1.55; }
 .form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 17px 20px; }
 .checks { display: flex; min-height: 41px; align-items: center; gap: 18px; border: 1px solid #ddd5d0; border-radius: 9px; padding: 0 11px; }.checks label, .inline-check { display: flex; align-items: center; gap: 7px; }.checks input, .inline-check input { width: auto; accent-color: #d94f69; }
+.field-help { grid-column: 1 / -1; margin: -4px 0 4px; color: #8b7d76; font-size: 13px; }
 .inline-check { margin-top: 20px; }.actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .primary, .secondary { border-radius: 9px; padding: 10px 18px; border: 1px solid transparent; }.primary { color: white; background: #d95069; }.primary:hover { background: #c9435c; }.secondary { background: white; color: #5a514d; border-color: #dcd4cf; }.compact { padding: 7px 12px; margin-top: 10px; }.wide { width: 100%; }
 .preview { display: grid; gap: 5px; margin-top: 20px; padding: 15px; border-radius: 10px; background: #fff5f7; border: 1px solid #f1d2d9; }.preview span { color: #716763; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

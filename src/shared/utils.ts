@@ -27,6 +27,18 @@ export function parseUserId(value: string): string | null {
   } catch { return null }
 }
 
+export function parseSearchKeyword(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  try {
+    const url = new URL(trimmed)
+    if (!/(^|\.)pixiv\.net$/i.test(url.hostname)) return null
+    const tag = url.pathname.match(/\/tags\/([^/]+)/)?.[1]
+    if (tag) return decodeURIComponent(tag).trim() || null
+    return url.searchParams.get('word')?.trim() || null
+  } catch { return trimmed }
+}
+
 export function retryDelay(attempt: number, status?: number, retryAfter?: string | null): number {
   if (status === 429) {
     const seconds = Number(retryAfter)

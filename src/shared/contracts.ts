@@ -8,7 +8,7 @@ export type TaskStatus = z.infer<typeof TaskStatusSchema>
 
 export const SourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('artworks'), values: z.array(z.string()).min(1) }),
-  z.object({ kind: z.literal('search'), value: z.string().trim().min(1).max(100), maxResults: z.number().int().min(1).max(1000).default(100) }),
+  z.object({ kind: z.literal('search'), value: z.string().trim().min(1).max(500), maxImages: z.number().int().min(1).max(100).default(100) }),
   z.object({ kind: z.literal('author'), value: z.string().min(1) }),
   z.object({ kind: z.literal('bookmarks') })
 ])
@@ -22,7 +22,10 @@ export const FilterSchema = z.object({
   excludeTags: z.array(z.string()).default([]),
   bookmarkVisibility: z.enum(['show', 'hide', 'both']).default('both'),
   ai: z.enum(['include', 'exclude', 'only']).default('include'),
-  age: z.enum(['all', 'safe', 'r18']).default('all')
+  age: z.enum(['all', 'safe', 'r18']).default('all'),
+  minBookmarks: z.number().int().min(0).default(0),
+  minViews: z.number().int().min(0).default(0),
+  minLikes: z.number().int().min(0).default(0)
 })
 export type DownloadFilter = z.infer<typeof FilterSchema>
 
@@ -64,7 +67,7 @@ export interface TaskRecord {
   updatedAt: string
 }
 
-export interface PreviewResult { count: number; sample: ArtworkSummary[]; warnings: string[] }
+export interface PreviewResult { count: number; imageCount: number; sample: ArtworkSummary[]; warnings: string[] }
 export interface ArtworkSummary { id: string; title: string; authorName: string; type: 'illust' | 'manga' | 'ugoira' }
 export interface AuthStatus { loggedIn: boolean; userId?: string; userName?: string }
 export interface UpdateResult { available: boolean; current: string; latest?: string; url?: string; error?: string }
@@ -84,6 +87,9 @@ export interface PixivArtwork {
   uploadDate: string
   aiType: number
   xRestrict: number
+  bookmarkCount: number
+  viewCount: number
+  likeCount: number
   sourceUrl: string
   pages: PixivPage[]
   ugoira?: { originalSrc: string; frames: UgoiraFrame[] }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { jitter, parseArtworkId, parseUserId, retryDelay, sanitizeSegment } from './utils'
+import { jitter, parseArtworkId, parseSearchKeyword, parseUserId, retryDelay, sanitizeSegment } from './utils'
 
 describe('shared utilities', () => {
   it('parses only Pixiv artwork and user identifiers', () => {
@@ -7,6 +7,11 @@ describe('shared utilities', () => {
     expect(parseArtworkId('123')).toBe('123')
     expect(parseArtworkId('https://evil.test/artworks/123')).toBeNull()
     expect(parseUserId('https://www.pixiv.net/users/42')).toBe('42')
+  })
+  it('accepts search keywords and Pixiv tag links', () => {
+    expect(parseSearchKeyword('莉可丽丝')).toBe('莉可丽丝')
+    expect(parseSearchKeyword('https://www.pixiv.net/tags/%E3%83%AA%E3%82%B3%E3%83%AA%E3%82%B9%E3%83%BB%E3%83%AA%E3%82%B3%E3%82%A4%E3%83%AB')).toBe('リコリス・リコイル')
+    expect(parseSearchKeyword('https://evil.test/tags/cat')).toBeNull()
   })
   it('creates Windows-safe path segments', () => {
     expect(sanitizeSegment('a:b?c. ')).toBe('a_b_c')

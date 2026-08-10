@@ -2,19 +2,23 @@ import { z } from 'zod'
 import type { Session } from 'electron'
 import type { AuthService } from './auth'
 import type { DownloadFilter, DownloadSource, PixivArtwork, PixivPage, UgoiraFrame } from '../shared/contracts'
-import { jitter, parseArtworkId, parseUserId, retryDelay, sleep } from '../shared/utils'
+import { jitter, parseArtworkId, parseSearchKeyword, parseUserId, retryDelay, sleep } from '../shared/utils'
 
 const ajaxSchema = z.object({ error: z.boolean(), message: z.string().optional(), body: z.unknown().optional() })
 const artworkSchema = z.object({
   illustId: z.coerce.string(), illustTitle: z.string(), illustComment: z.string().default(''), userId: z.coerce.string(), userName: z.string(),
   illustType: z.number(), createDate: z.string(), uploadDate: z.string().optional(), aiType: z.number().optional(), xRestrict: z.number().optional(),
+  bookmarkCount: z.coerce.number().catch(0), viewCount: z.coerce.number().catch(0), likeCount: z.coerce.number().catch(0),
   tags: z.object({ tags: z.array(z.object({ tag: z.string() })) })
 })
 const pagesSchema = z.array(z.object({ urls: z.object({ original: z.string() }), width: z.number().optional(), height: z.number().optional() }))
 const ugoiraSchema = z.object({ originalSrc: z.string(), frames: z.array(z.object({ file: z.string(), delay: z.number() })) })
 const searchSchema = z.object({
   illustManga: z.object({
-    data: z.array(z.object({ id: z.coerce.string() })),
+    data: z.array(z.object({
+      id: z.coerce.string(), bookmarkCount: z.coerce.number().optional(),
+      viewCount: z.coerce.number().optional(), likeCount: z.coerce.number().optional()
+    })),
     total: z.number()
   })
 })
@@ -33,6 +37,9 @@ export function matchesArtwork(work: PixivArtwork, filter: DownloadFilter): bool
   if (filter.ai === 'only' && work.aiType !== 2) return false
   if (filter.age === 'safe' && work.xRestrict !== 0) return false
   if (filter.age === 'r18' && work.xRestrict === 0) return false
+  if (work.bookmarkCount < filter.minBookmarks) return false
+  if (work.viewCount < filter.minViews) return false
+  if (work.likeCount < filter.minLikes) return false
   return true
 }
 
@@ -55,12 +62,11 @@ export class PixivClient {
   }
 
   async resolveSource(source: DownloadSource, filters: DownloadFilter, signal?: AbortSignal): Promise<PixivArtwork[]> {
+    if (source.kind === 'search') return this.resolveSearch(source.value, source.maxImages, filters, signal)
     let ids: string[]
     if (source.kind === 'artworks') {
       ids = source.values.map(parseArtworkId).filter((id): id is string => Boolean(id))
       if (ids.length !== source.values.length) throw new PixivError('包含无效的 Pixiv 作品链接或 ID', 'adapter')
-    } else if (source.kind === 'search') {
-      ids = await this.searchIds(source.value, source.maxResults, signal)
     } else if (source.kind === 'author') {
       const userId = parseUserId(source.value)
       if (!userId) throw new PixivError('作者链接或 ID 无效', 'adapter')
@@ -93,7 +99,8 @@ export class PixivClient {
       id: raw.illustId, title: raw.illustTitle, description: raw.illustComment,
       userId: raw.userId, userName: raw.userName, type, tags: raw.tags.tags.map((t) => t.tag),
       createDate: raw.createDate, uploadDate: raw.uploadDate ?? raw.createDate, aiType: raw.aiType ?? 0,
-      xRestrict: raw.xRestrict ?? 0, sourceUrl: `https://www.pixiv.net/artworks/${id}`, pages, ugoira
+      xRestrict: raw.xRestrict ?? 0, bookmarkCount: raw.bookmarkCount, viewCount: raw.viewCount, likeCount: raw.likeCount,
+      sourceUrl: `https://www.pixiv.net/artworks/${id}`, pages, ugoira
     }
   }
 
@@ -102,20 +109,40 @@ export class PixivClient {
       .parse(await this.getBody(`/ajax/user/${userId}/profile/all?lang=zh`, signal))
     return [...Object.keys(body.illusts ?? {}), ...Object.keys(body.manga ?? {})]
   }
-  private async searchIds(keyword: string, maxResults: number, signal?: AbortSignal): Promise<string[]> {
-    const ids: string[] = []
-    const word = keyword.trim()
+  private async resolveSearch(input: string, maxImages: number, filters: DownloadFilter, signal?: AbortSignal): Promise<PixivArtwork[]> {
+    const word = parseSearchKeyword(input)
+    if (!word) throw new PixivError('请输入关键词或有效的 Pixiv 标签链接', 'adapter')
     const encoded = encodeURIComponent(word)
-    for (let page = 1; ids.length < maxResults; page++) {
+    const results: PixivArtwork[] = []
+    const seen = new Set<string>()
+    let imageCount = 0
+    let inspected = 0
+    const hasPopularityFilter = filters.minBookmarks > 0 || filters.minViews > 0 || filters.minLikes > 0
+    const candidateLimit = hasPopularityFilter ? 500 : Math.max(60, maxImages * 2)
+    for (let page = 1; inspected < candidateLimit && imageCount < maxImages; page++) {
       const query = new URLSearchParams({ word, order: 'date_d', mode: 'all', p: String(page), s_mode: 's_tag', type: 'all', lang: 'zh' })
       const parsed = searchSchema.safeParse(await this.getBody(`/ajax/search/artworks/${encoded}?${query}`, signal))
       if (!parsed.success) throw new PixivError('Pixiv 搜索接口结构已变化，请更新站点适配器', 'adapter')
       const body = parsed.data
-      const batch = body.illustManga.data.map((work) => work.id)
-      ids.push(...batch.slice(0, maxResults - ids.length))
-      if (batch.length === 0 || ids.length >= body.illustManga.total) break
+      const batch = body.illustManga.data.filter((work) => !seen.has(work.id))
+      for (const candidate of batch) {
+        if (inspected >= candidateLimit || imageCount >= maxImages) break
+        const id = candidate.id
+        seen.add(id); inspected += 1; signal?.throwIfAborted()
+        if (candidate.bookmarkCount !== undefined && candidate.bookmarkCount < filters.minBookmarks) continue
+        if (candidate.viewCount !== undefined && candidate.viewCount < filters.minViews) continue
+        if (candidate.likeCount !== undefined && candidate.likeCount < filters.minLikes) continue
+        try {
+          const artwork = await this.getArtwork(id, signal)
+          const pages = Math.max(1, artwork.pages.length)
+          if (matchesArtwork(artwork, filters) && pages <= maxImages - imageCount) {
+            results.push(artwork); imageCount += pages
+          }
+        } catch (error) { if (!(error instanceof PixivError) || error.code !== 'not-found') throw error }
+      }
+      if (batch.length === 0 || seen.size >= body.illustManga.total) break
     }
-    return ids
+    return results
   }
   private async bookmarkIds(userId: string, visibility: 'show' | 'hide' | 'both', signal?: AbortSignal): Promise<string[]> {
     const ids: string[] = []

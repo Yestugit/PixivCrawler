@@ -18,7 +18,7 @@ export class TaskManager {
 
   async preview(input: CreateTaskInput): Promise<PreviewResult> {
     const works = await this.pixiv.resolveSource(input.source, input.filters)
-    return { count: works.length, sample: works.slice(0, 12).map((w) => ({ id: w.id, title: w.title, authorName: w.userName, type: w.type })), warnings: works.length === 0 ? ['没有作品符合筛选条件'] : [] }
+    return { count: works.length, imageCount: works.reduce((total, work) => total + Math.max(1, work.pages.length), 0), sample: works.slice(0, 12).map((w) => ({ id: w.id, title: w.title, authorName: w.userName, type: w.type })), warnings: works.length === 0 ? ['没有作品符合筛选条件'] : [] }
   }
   create(input: CreateTaskInput): TaskRecord {
     const task = this.db.createTask(nanoid(), input)

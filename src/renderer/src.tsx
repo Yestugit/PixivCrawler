@@ -7,7 +7,7 @@ const statusText: Record<TaskRecord['status'], string> = {
   resolving: '解析中', queued: '排队中', downloading: '下载中', converting: '转换中', paused: '已暂停',
   completed: '已完成', partial: '部分失败', failed: '失败', canceled: '已取消'
 }
-const initialFilters: DownloadFilter = { types: ['illust', 'manga', 'ugoira'], includeTags: [], excludeTags: [], bookmarkVisibility: 'both', ai: 'include', age: 'all' }
+const initialFilters: DownloadFilter = { types: ['illust', 'manga', 'ugoira'], includeTags: [], excludeTags: [], bookmarkVisibility: 'both', ai: 'include', age: 'all', minBookmarks: 0, minViews: 0, minLikes: 0 }
 
 function App(): React.JSX.Element {
   const [page, setPage] = useState<'tasks' | 'create' | 'history' | 'settings'>('tasks')
@@ -28,7 +28,7 @@ function App(): React.JSX.Element {
   const login = async (): Promise<void> => { setError(''); try { setAuth(await window.pixivCrawler.auth.openLogin()) } catch (e) { setError(message(e)) } }
   const logout = async (): Promise<void> => { await window.pixivCrawler.auth.logout(); setAuth({ loggedIn: false }) }
   const active = tasks.filter((t) => !['completed', 'canceled'].includes(t.status))
-  const history = tasks.filter((t) => ['completed', 'canceled'].includes(t.status))
+  const history = tasks.filter((t) => t.status === 'completed')
 
   return <div className="app-shell">
     <aside>
@@ -48,7 +48,7 @@ function App(): React.JSX.Element {
     <main>
       {error && <div className="error-banner">{error}<button onClick={() => setError('')}>×</button></div>}
       {page === 'tasks' && <Tasks title="任务队列" subtitle="任务会在应用重启后保留；未完成任务将安全地暂停。" tasks={active} empty="还没有进行中的任务" />}
-      {page === 'history' && <Tasks title="下载历史" subtitle="查看已完成或取消的归档任务。" tasks={history} empty="暂无下载历史" />}
+      {page === 'history' && <Tasks title="下载历史" subtitle="查看已经完成的归档任务；取消的空任务不会显示在这里。" tasks={history} empty="暂无下载历史" />}
       {page === 'create' && <CreateTask auth={auth} onCreated={(task) => { setTasks((t) => [task, ...t]); setPage('tasks') }} onError={setError} />}
       {page === 'settings' && settings && <SettingsPage value={settings} onChange={setSettings} onError={setError} />}
     </main>
@@ -82,14 +82,14 @@ function Tasks({ title, subtitle, tasks, empty }: { title: string; subtitle: str
 function CreateTask({ auth, onCreated, onError }: { auth: AuthStatus; onCreated(task: TaskRecord): void; onError(value: string): void }): React.JSX.Element {
   const [kind, setKind] = useState<DownloadSource['kind']>('artworks')
   const [value, setValue] = useState('')
-  const [maxResults, setMaxResults] = useState(100)
+  const [maxImages, setMaxImages] = useState(100)
   const [filters, setFilters] = useState<DownloadFilter>(initialFilters)
   const [force, setForce] = useState(false)
   const [preview, setPreview] = useState<PreviewResult>()
   const [busy, setBusy] = useState(false)
   const input = useMemo<CreateTaskInput>(() => ({
-    source: kind === 'artworks' ? { kind, values: value.split(/\r?\n|,/).map((v) => v.trim()).filter(Boolean) } : kind === 'search' ? { kind, value: value.trim(), maxResults } : kind === 'author' ? { kind, value: value.trim() } : { kind }, filters, force
-  }), [kind, value, maxResults, filters, force])
+    source: kind === 'artworks' ? { kind, values: value.split(/\r?\n|,/).map((v) => v.trim()).filter(Boolean) } : kind === 'search' ? { kind, value: value.trim(), maxImages } : kind === 'author' ? { kind, value: value.trim() } : { kind }, filters, force
+  }), [kind, value, maxImages, filters, force])
   const execute = async (mode: 'preview' | 'create'): Promise<void> => {
     setBusy(true); onError('')
     try {
@@ -102,8 +102,14 @@ function CreateTask({ auth, onCreated, onError }: { auth: AuthStatus; onCreated(
     <div className="panel"><h3>下载来源</h3><div className="segmented">
       {([['artworks', '作品链接'], ['search', '搜索作品'], ['author', '作者作品'], ['bookmarks', '我的收藏']] as const).map(([id, label]) => <button className={kind === id ? 'selected' : ''} onClick={() => { setKind(id); setValue(''); setPreview(undefined) }} key={id}>{label}</button>)}
     </div>
-    {kind !== 'bookmarks' && <label>{kind === 'artworks' ? '作品链接或 ID（每行一个）' : kind === 'search' ? '搜索关键词' : '作者链接或 ID'}<textarea rows={kind === 'artworks' ? 5 : 2} value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === 'artworks' ? 'https://www.pixiv.net/artworks/123456' : kind === 'search' ? '输入作品标签或关键词' : 'https://www.pixiv.net/users/123456'} /></label>}
-    {kind === 'search' && <label>最多获取作品数<input type="number" min="1" max="1000" value={maxResults} onChange={(e) => setMaxResults(Math.max(1, Math.min(1000, Number(e.target.value) || 1)))} /></label>}
+    {kind !== 'bookmarks' && <label>{kind === 'artworks' ? '作品链接或 ID（每行一个）' : kind === 'search' ? '主题、标签或 Pixiv 标签页链接' : '作者链接或 ID'}<textarea rows={kind === 'artworks' ? 5 : 2} value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === 'artworks' ? 'https://www.pixiv.net/artworks/123456' : kind === 'search' ? '例如：リコリス・リコイル、莉可丽丝，或粘贴 Pixiv 标签页链接' : 'https://www.pixiv.net/users/123456'} /></label>}
+    {kind === 'search' && <div className="form-grid search-limits">
+      <label>最多下载图片数<input type="number" min="1" max="100" value={maxImages} onChange={(e) => setMaxImages(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} /></label>
+      <label>最低收藏数<input type="number" min="0" value={filters.minBookmarks} onChange={(e) => setFilters({ ...filters, minBookmarks: nonNegative(e.target.value) })} /></label>
+      <label>最低浏览数<input type="number" min="0" value={filters.minViews} onChange={(e) => setFilters({ ...filters, minViews: nonNegative(e.target.value) })} /></label>
+      <label>最低点赞数<input type="number" min="0" value={filters.minLikes} onChange={(e) => setFilters({ ...filters, minLikes: nonNegative(e.target.value) })} /></label>
+      <p className="field-help">热度筛选最多检查 500 个最新候选作品；数值越高，预览所需时间可能越长。</p>
+    </div>}
     <h3>筛选条件</h3><div className="form-grid">
       <label>作品类型<div className="checks">{(['illust', 'manga', 'ugoira'] as const).map((type) => <label key={type}><input type="checkbox" checked={filters.types.includes(type)} onChange={() => setFilters({ ...filters, types: filters.types.includes(type) ? filters.types.filter((t) => t !== type) : [...filters.types, type] })} />{{ illust: '插画', manga: '漫画', ugoira: '动图' }[type]}</label>)}</div></label>
       <label>年龄分级<select value={filters.age} onChange={(e) => setFilters({ ...filters, age: e.target.value as DownloadFilter['age'] })}><option value="all">全部可见作品</option><option value="safe">仅全年龄</option><option value="r18">仅 R-18 / R-18G</option></select></label>
@@ -114,7 +120,7 @@ function CreateTask({ auth, onCreated, onError }: { auth: AuthStatus; onCreated(
       <label>AI 作品<select value={filters.ai} onChange={(e) => setFilters({ ...filters, ai: e.target.value as DownloadFilter['ai'] })}><option value="include">包含</option><option value="exclude">排除</option><option value="only">仅 AI 作品</option></select></label>
       {kind === 'bookmarks' && <label>收藏范围<select value={filters.bookmarkVisibility} onChange={(e) => setFilters({ ...filters, bookmarkVisibility: e.target.value as DownloadFilter['bookmarkVisibility'] })}><option value="both">公开和非公开</option><option value="show">仅公开</option><option value="hide">仅非公开</option></select></label>}
     </div><label className="inline-check"><input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />强制重新下载已有文件</label>
-    {preview && <div className="preview"><strong>匹配 {preview.count} 个作品</strong>{preview.warnings.map((w) => <p key={w}>{w}</p>)}{preview.sample.map((w) => <span key={w.id}>{w.title} · {w.authorName}</span>)}</div>}
+    {preview && <div className="preview"><strong>匹配 {preview.count} 个作品，共 {preview.imageCount} 张图片</strong>{preview.warnings.map((w) => <p key={w}>{w}</p>)}{preview.sample.map((w) => <span key={w.id}>{w.title} · {w.authorName}</span>)}</div>}
     <div className="actions"><button className="secondary" disabled={busy} onClick={() => void execute('preview')}>预览结果</button><button className="primary" disabled={busy} onClick={() => void execute('create')}>{busy ? '处理中…' : '创建任务'}</button></div>
     </div>
   </section>
@@ -145,6 +151,7 @@ function Empty({ text }: { text: string }): React.JSX.Element { return <div clas
 function sourceName(source: DownloadSource): string { return source.kind === 'artworks' ? `${source.values.length} 个作品` : source.kind === 'search' ? `搜索：${source.value}` : source.kind === 'author' ? `作者 ${source.value}` : '我的收藏' }
 function formatTime(value: string): string { return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) }
 function tags(value: string): string[] { return value.split(/[,，]/).map((v) => v.trim()).filter(Boolean) }
+function nonNegative(value: string): number { return Math.max(0, Math.floor(Number(value) || 0)) }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>)
