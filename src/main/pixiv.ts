@@ -28,6 +28,24 @@ const searchSchema = z.object({
 })
 type ArtworkDetail = z.infer<typeof artworkSchema>
 type SearchWork = z.infer<typeof searchWorkSchema>
+const resolutionCheckpointSchema = z.discriminatedUnion('kind', [
+  z.object({
+    version: z.literal(1), kind: z.literal('search'), word: z.string(), strategy: z.enum(['balanced', 'newest', 'oldest']),
+    maxImages: z.number(), candidates: z.array(searchWorkSchema), pagePlan: z.array(z.number().int().positive()),
+    nextPageIndex: z.number().int().nonnegative(), collectionComplete: z.boolean(), nextIndex: z.number().int().nonnegative(),
+    matchedImages: z.number().int().nonnegative(), candidateTotal: z.number().int().nonnegative()
+  }),
+  z.object({
+    version: z.literal(1), kind: z.literal('ids'), ids: z.array(z.string()), nextIndex: z.number().int().nonnegative(),
+    matchedImages: z.number().int().nonnegative(), candidateTotal: z.number().int().nonnegative()
+  })
+])
+export type ResolutionCheckpoint = z.infer<typeof resolutionCheckpointSchema>
+export interface ResolveHooks {
+  checkpoint?: unknown
+  onCheckpoint?(checkpoint: ResolutionCheckpoint): void
+  onAccepted?(artwork: PixivArtwork): void
+}
 const searchCandidatesSchema = z.object({
   candidates: z.array(z.object({
     tag_name: z.string(), tag_translation: z.string().nullable().optional()
@@ -41,6 +59,12 @@ export function pickTranslatedTag(word: string, candidates: { tag_name: string; 
   const exact = candidates.find((candidate) =>
     candidate.tag_name.toLocaleLowerCase() === normalized || candidate.tag_translation?.toLocaleLowerCase() === normalized)
   return exact?.tag_name ?? word
+}
+
+export function evenlySpacedPages(totalPages: number, count: number): number[] {
+  if (count <= 1 || totalPages <= 1) return [1]
+  const pages = Array.from({ length: count }, (_, index) => 1 + Math.round(index * (totalPages - 1) / (count - 1)))
+  return [...new Set(pages)]
 }
 
 export function matchesArtwork(work: PixivArtwork, filter: DownloadFilter): boolean {
@@ -106,10 +130,16 @@ export class PixivClient {
     return Date.now() - started
   }
 
-  async resolveSource(source: DownloadSource, filters: DownloadFilter, signal?: AbortSignal, onProgress?: (progress: ResolveProgress) => void): Promise<PixivArtwork[]> {
-    if (source.kind === 'search') return this.resolveSearch(source.value, source.maxImages, filters, signal, onProgress)
+  async resolveSource(
+    source: DownloadSource, filters: DownloadFilter, signal?: AbortSignal,
+    onProgress?: (progress: ResolveProgress) => void, hooks: ResolveHooks = {}
+  ): Promise<PixivArtwork[]> {
+    if (source.kind === 'search') return this.resolveSearch(source, filters, signal, onProgress, hooks)
+    const saved = resolutionCheckpointSchema.safeParse(hooks.checkpoint)
+    let state = saved.success && saved.data.kind === 'ids' ? saved.data : undefined
     let ids: string[]
-    if (source.kind === 'artworks') {
+    if (state) ids = state.ids
+    else if (source.kind === 'artworks') {
       ids = source.values.map(parseArtworkId).filter((id): id is string => Boolean(id))
       if (ids.length !== source.values.length) throw new PixivError('包含无效的 Pixiv 作品链接或 ID', 'adapter')
     } else if (source.kind === 'author') {
@@ -121,14 +151,22 @@ export class PixivClient {
       if (!status.loggedIn || !status.userId) throw new PixivError('请先登录 Pixiv', 'auth')
       ids = await this.bookmarkIds(status.userId, filters.bookmarkVisibility, signal)
     }
-    const unique = [...new Set(ids)]
+    const unique = state?.ids ?? [...new Set(ids)]
+    state ??= { version: 1, kind: 'ids', ids: unique, nextIndex: 0, matchedImages: 0, candidateTotal: unique.length }
+    hooks.onCheckpoint?.(state)
     const results: PixivArtwork[] = []
-    for (const id of unique) {
+    for (; state.nextIndex < unique.length; state.nextIndex += 1) {
       signal?.throwIfAborted()
+      const id = unique[state.nextIndex]!
       try {
         const artwork = await this.getArtwork(id, signal)
-        if (matchesArtwork(artwork, filters)) results.push(artwork)
+        if (matchesArtwork(artwork, filters)) {
+          results.push(artwork); state.matchedImages += Math.max(1, artwork.pages.length); hooks.onAccepted?.(artwork)
+        }
       } catch (error) { if (!(error instanceof PixivError) || error.code !== 'not-found') throw error }
+      const committed = { ...state, nextIndex: state.nextIndex + 1 }
+      hooks.onCheckpoint?.(committed)
+      onProgress?.({ inspectedCandidates: committed.nextIndex, candidateTotal: state.candidateTotal, matchedImages: state.matchedImages })
     }
     return results
   }
@@ -165,83 +203,95 @@ export class PixivClient {
     return [...Object.keys(body.illusts ?? {}), ...Object.keys(body.manga ?? {})]
   }
   private async resolveSearch(
-    input: string, maxImages: number, filters: DownloadFilter, signal?: AbortSignal,
-    onProgress?: (progress: ResolveProgress) => void
+    source: Extract<DownloadSource, { kind: 'search' }>, filters: DownloadFilter, signal?: AbortSignal,
+    onProgress?: (progress: ResolveProgress) => void, hooks: ResolveHooks = {}
   ): Promise<PixivArtwork[]> {
-    const parsedWord = parseSearchKeyword(input)
+    const parsedWord = parseSearchKeyword(source.value)
     if (!parsedWord) throw new PixivError('请输入关键词或有效的 Pixiv 标签链接', 'adapter')
-    const word = await this.resolveTranslatedTag(parsedWord, signal)
-    const encoded = encodeURIComponent(word)
-    const results: PixivArtwork[] = []
-    const seen = new Set<string>()
-    let imageCount = 0
-    let inspected = 0
-    let candidateTotal = 500
-    const candidateLimit = 500
-    for (let page = 1; inspected < candidateLimit && imageCount < maxImages; page++) {
-      const query = new URLSearchParams({ word, order: 'date_d', mode: 'all', p: String(page), s_mode: 's_tag', type: 'all', lang: 'zh' })
-      const parsed = searchSchema.safeParse(await this.getBody(`/ajax/search/artworks/${encoded}?${query}`, signal))
-      if (!parsed.success) throw new PixivError('Pixiv 搜索接口结构已变化，请更新站点适配器', 'adapter')
-      const body = parsed.data
-      candidateTotal = Math.min(body.illustManga.total, candidateLimit)
-      onProgress?.({ inspectedCandidates: inspected, candidateTotal, matchedImages: imageCount })
-      const batch = body.illustManga.data.filter((work) => !seen.has(work.id)).slice(0, candidateLimit - inspected)
-      batch.forEach((work) => seen.add(work.id))
-      const completed = new Map<number, ArtworkDetail | null>()
-      const accepted: ArtworkDetail[] = []
-      let nextCommit = 0
-      const commitReady = (): void => {
-        while (completed.has(nextCommit)) {
-          const detail = completed.get(nextCommit) ?? null
-          completed.delete(nextCommit); nextCommit += 1
-          if (detail && detail.pageCount <= maxImages - imageCount) {
-            accepted.push(detail)
-            imageCount += detail.pageCount
-          }
-        }
+    const saved = resolutionCheckpointSchema.safeParse(hooks.checkpoint)
+    let state = saved.success && saved.data.kind === 'search' && saved.data.strategy === source.strategy && saved.data.maxImages === source.maxImages
+      ? saved.data : undefined
+    if (!state) {
+      const word = await this.resolveTranslatedTag(parsedWord, signal)
+      state = {
+        version: 1, kind: 'search', word, strategy: source.strategy, maxImages: source.maxImages,
+        candidates: [], pagePlan: [], nextPageIndex: 0, collectionComplete: false,
+        nextIndex: 0, matchedImages: 0, candidateTotal: 500
       }
-      await this.runConcurrent(batch, async (candidate, index) => {
-        let detail: ArtworkDetail | null = null
+    }
+    const encoded = encodeURIComponent(state.word)
+    const results: PixivArtwork[] = []
+    const candidateLimit = 500
+    if (!state.collectionComplete) {
+      const seen = new Set(state.candidates.map((candidate) => candidate.id))
+      if (state.pagePlan.length === 0) {
+        const first = await this.searchPage(encoded, state.word, state.strategy, 1, signal)
+        for (const candidate of first.data) if (!seen.has(candidate.id) && state.candidates.length < candidateLimit) {
+          seen.add(candidate.id); state.candidates.push(candidate)
+        }
+        const pageSize = Math.max(1, first.data.length || 60)
+        const totalPages = Math.max(1, Math.ceil(first.total / pageSize))
+        const pagesNeeded = Math.min(totalPages, Math.ceil(Math.min(first.total, candidateLimit) / pageSize))
+        state.pagePlan = state.strategy === 'balanced' ? evenlySpacedPages(totalPages, pagesNeeded) : Array.from({ length: pagesNeeded }, (_, index) => index + 1)
+        state.nextPageIndex = state.pagePlan.indexOf(1) + 1
+        state.candidateTotal = Math.min(first.total, candidateLimit)
+        hooks.onCheckpoint?.(state)
+        onProgress?.({ inspectedCandidates: state.nextIndex, candidateTotal: state.candidateTotal, matchedImages: state.matchedImages })
+      }
+      while (state.nextPageIndex < state.pagePlan.length && state.candidates.length < candidateLimit) {
+        signal?.throwIfAborted()
+        const page = state.pagePlan[state.nextPageIndex]!
+        const value = await this.searchPage(encoded, state.word, state.strategy, page, signal)
+        for (const candidate of value.data) if (!seen.has(candidate.id) && state.candidates.length < candidateLimit) {
+          seen.add(candidate.id); state.candidates.push(candidate)
+        }
+        state.nextPageIndex += 1
+        hooks.onCheckpoint?.(state)
+      }
+      if (state.strategy === 'balanced') {
+        state.candidates = state.candidates.map((candidate, index) => ({ candidate, index }))
+          .sort((a, b) => (b.candidate.bookmarkCount ?? -1) - (a.candidate.bookmarkCount ?? -1) || a.index - b.index)
+          .map(({ candidate }) => candidate)
+      }
+      state.candidateTotal = state.candidates.length
+      state.collectionComplete = true
+      hooks.onCheckpoint?.(state)
+    }
+    const batchSize = Math.max(1, this.concurrency())
+    while (state.nextIndex < state.candidates.length && state.matchedImages < source.maxImages) {
+      signal?.throwIfAborted()
+      const candidates = state.candidates.slice(state.nextIndex, state.nextIndex + batchSize)
+      const details = await Promise.all(candidates.map(async (candidate): Promise<ArtworkDetail | null> => {
         const popularityMatches =
           (candidate.bookmarkCount === undefined || candidate.bookmarkCount >= filters.minBookmarks) &&
           (candidate.viewCount === undefined || candidate.viewCount >= filters.minViews) &&
           (candidate.likeCount === undefined || candidate.likeCount >= filters.minLikes)
-        if (matchesSearchSummary(candidate, filters) && popularityMatches) {
-          try {
-            const value = await this.getArtworkDetail(candidate.id, signal)
-            if (matchesArtworkDetail(value, filters)) detail = value
-          } catch (error) { if (!(error instanceof PixivError) || error.code !== 'not-found') throw error }
-        }
-        completed.set(index, detail)
-        inspected += 1
-        commitReady()
-        onProgress?.({ inspectedCandidates: inspected, candidateTotal, matchedImages: imageCount })
-      }, signal, () => imageCount >= maxImages)
-      const hydrated = new Array<PixivArtwork>(accepted.length)
-      await this.runConcurrent(accepted, async (detail, index) => {
-        hydrated[index] = await this.hydrateArtwork(detail, signal)
-      }, signal)
-      results.push(...hydrated)
-      if (batch.length === 0 || seen.size >= body.illustManga.total) break
-    }
-    onProgress?.({ inspectedCandidates: inspected, candidateTotal, matchedImages: imageCount })
-    return results
-  }
-  private async runConcurrent<T>(
-    items: T[], worker: (item: T, index: number) => Promise<void>, signal?: AbortSignal,
-    shouldStop: () => boolean = () => false
-  ): Promise<void> {
-    let next = 0
-    const run = async (): Promise<void> => {
-      while (!shouldStop()) {
+        if (!matchesSearchSummary(candidate, filters) || !popularityMatches) return null
+        try {
+          const detail = await this.getArtworkDetail(candidate.id, signal)
+          return matchesArtworkDetail(detail, filters) ? detail : null
+        } catch (error) { if (error instanceof PixivError && error.code === 'not-found') return null; throw error }
+      }))
+      for (const detail of details) {
         signal?.throwIfAborted()
-        const index = next
-        if (index >= items.length) return
-        next += 1
-        await worker(items[index]!, index)
+        if (detail && detail.pageCount <= source.maxImages - state.matchedImages) {
+          const artwork = await this.hydrateArtwork(detail, signal)
+          results.push(artwork); state.matchedImages += detail.pageCount; hooks.onAccepted?.(artwork)
+        }
+        state.nextIndex += 1
+        hooks.onCheckpoint?.(state)
+        onProgress?.({ inspectedCandidates: state.nextIndex, candidateTotal: state.candidateTotal, matchedImages: state.matchedImages })
+        if (state.matchedImages >= source.maxImages) break
       }
     }
-    await Promise.all(Array.from({ length: Math.min(this.concurrency(), items.length) }, run))
+    onProgress?.({ inspectedCandidates: state.nextIndex, candidateTotal: state.candidateTotal, matchedImages: state.matchedImages })
+    return results
+  }
+  private async searchPage(encoded: string, word: string, strategy: 'balanced' | 'newest' | 'oldest', page: number, signal?: AbortSignal): Promise<{ data: SearchWork[]; total: number }> {
+    const query = new URLSearchParams({ word, order: strategy === 'oldest' ? 'date' : 'date_d', mode: 'all', p: String(page), s_mode: 's_tag', type: 'all', lang: 'zh' })
+    const parsed = searchSchema.safeParse(await this.getBody(`/ajax/search/artworks/${encoded}?${query}`, signal))
+    if (!parsed.success) throw new PixivError('Pixiv 搜索接口结构已变化，请更新站点适配器', 'adapter')
+    return parsed.data.illustManga
   }
   private async resolveTranslatedTag(word: string, signal?: AbortSignal): Promise<string> {
     const parsed = searchCandidatesSchema.safeParse(await this.getJson(`/rpc/cps.php?keyword=${encodeURIComponent(word)}&lang=zh`, signal))

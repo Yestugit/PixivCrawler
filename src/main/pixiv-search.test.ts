@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AuthService } from './auth'
-import { PixivClient } from './pixiv'
+import { evenlySpacedPages, PixivClient } from './pixiv'
 import type { DownloadFilter, ResolveProgress } from '../shared/contracts'
 
 const filters: DownloadFilter = {
@@ -21,6 +21,10 @@ function detail(id: string, likes: number, pageCount = 1): unknown {
 }
 
 describe('optimized Pixiv search resolution', () => {
+  it('spreads balanced candidates across the complete result timeline', () => {
+    expect(evenlySpacedPages(101, 5)).toEqual([1, 26, 51, 76, 101])
+    expect(evenlySpacedPages(1, 9)).toEqual([1])
+  })
   it('prefilters summaries, resolves details concurrently, and fetches pages only for matches', async () => {
     const requested: string[] = []
     let active = 0
@@ -49,7 +53,7 @@ describe('optimized Pixiv search resolution', () => {
     const auth = { session } as unknown as AuthService
     const client = new PixivClient(auth, () => 0, () => 4)
     const progress: ResolveProgress[] = []
-    const works = await client.resolveSource({ kind: 'search', value: 'theme', maxImages: 2 }, filters, undefined, (value) => progress.push({ ...value }))
+    const works = await client.resolveSource({ kind: 'search', value: 'theme', maxImages: 2, strategy: 'newest' }, filters, undefined, (value) => progress.push({ ...value }))
 
     expect(works.map((work) => work.id)).toEqual(['3'])
     expect(requested.some((path) => path.startsWith('/ajax/illust/1?'))).toBe(false)
@@ -75,11 +79,44 @@ describe('optimized Pixiv search resolution', () => {
     }
     const client = new PixivClient({ session } as unknown as AuthService, () => 0, () => 4)
     await Promise.all([
-      client.resolveSource({ kind: 'search', value: 'one', maxImages: 1 }, { ...filters, minLikes: 0 }),
-      client.resolveSource({ kind: 'search', value: 'two', maxImages: 1 }, { ...filters, minLikes: 0 })
+      client.resolveSource({ kind: 'search', value: 'one', maxImages: 1, strategy: 'newest' }, { ...filters, minLikes: 0 }),
+      client.resolveSource({ kind: 'search', value: 'two', maxImages: 1, strategy: 'newest' }, { ...filters, minLikes: 0 })
     ])
     const first = starts[0]!.at
     const firstSearch = starts.find((item) => item.path.startsWith('/ajax/search/'))!.at
     expect(firstSearch - first).toBeGreaterThanOrEqual(15)
+  })
+  it('resumes from the first uncommitted candidate checkpoint', async () => {
+    const requestedDetails: string[] = []
+    const session = {
+      fetch: async (input: string): Promise<Response> => {
+        const url = new URL(String(input))
+        if (url.pathname === '/rpc/cps.php') return new Response(JSON.stringify({ candidates: [] }), { status: 200 })
+        if (url.pathname.startsWith('/ajax/search/artworks/')) return envelope({ illustManga: { total: 4, data: [
+          { id: '1', illustType: 0, xRestrict: 0, tags: ['theme'], createDate: '2026-01-04', aiType: 0, pageCount: 1 },
+          { id: '2', illustType: 0, xRestrict: 0, tags: ['theme'], createDate: '2026-01-03', aiType: 0, pageCount: 1 },
+          { id: '3', illustType: 0, xRestrict: 0, tags: ['theme'], createDate: '2026-01-02', aiType: 0, pageCount: 1 },
+          { id: '4', illustType: 0, xRestrict: 0, tags: ['theme'], createDate: '2026-01-01', aiType: 0, pageCount: 1 }
+        ] } })
+        const id = url.pathname.match(/\/ajax\/illust\/(\d+)$/)?.[1]
+        if (id) { requestedDetails.push(id); return envelope(detail(id, 0)) }
+        throw new Error(`Unexpected request: ${url}`)
+      }
+    }
+    const client = new PixivClient({ session } as unknown as AuthService, () => 0, () => 2)
+    let checkpoint: unknown
+    const controller = new AbortController()
+    await expect(client.resolveSource(
+      { kind: 'search', value: 'theme', maxImages: 4, strategy: 'newest' }, { ...filters, minLikes: 1000 }, controller.signal,
+      (progress) => { if (progress.inspectedCandidates === 1) controller.abort() },
+      { onCheckpoint: (value) => { checkpoint = structuredClone(value) } }
+    )).rejects.toBeDefined()
+    expect((checkpoint as { nextIndex: number }).nextIndex).toBe(1)
+    requestedDetails.length = 0
+    await client.resolveSource(
+      { kind: 'search', value: 'theme', maxImages: 4, strategy: 'newest' }, { ...filters, minLikes: 1000 }, undefined, undefined,
+      { checkpoint }
+    )
+    expect(requestedDetails).not.toContain('1')
   })
 })

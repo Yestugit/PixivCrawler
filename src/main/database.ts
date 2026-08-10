@@ -37,6 +37,11 @@ export class AppDatabase {
         path TEXT NOT NULL, size INTEGER NOT NULL, completed_at TEXT NOT NULL,
         PRIMARY KEY (artwork_id, page_index, format)
       );
+      CREATE TABLE IF NOT EXISTS task_files (
+        task_id TEXT NOT NULL, artwork_id TEXT NOT NULL, page_index INTEGER NOT NULL, format TEXT NOT NULL,
+        path TEXT NOT NULL, size INTEGER NOT NULL, completed_at TEXT NOT NULL,
+        PRIMARY KEY (task_id, artwork_id, page_index, format)
+      );
       INSERT OR IGNORE INTO schema_migrations(version) VALUES (1);
     `)
     const hasVersion2 = this.db.prepare('SELECT 1 FROM schema_migrations WHERE version = 2').get()
@@ -47,6 +52,12 @@ export class AppDatabase {
       if (!names.has('candidate_total')) this.db.exec('ALTER TABLE tasks ADD COLUMN candidate_total INTEGER NOT NULL DEFAULT 0')
       if (!names.has('matched_images')) this.db.exec('ALTER TABLE tasks ADD COLUMN matched_images INTEGER NOT NULL DEFAULT 0')
       this.db.prepare('INSERT INTO schema_migrations(version) VALUES (2)').run()
+    }
+    const hasVersion3 = this.db.prepare('SELECT 1 FROM schema_migrations WHERE version = 3').get()
+    if (!hasVersion3) {
+      const columns = this.db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[]
+      if (!columns.some((column) => column.name === 'resolution_json')) this.db.exec('ALTER TABLE tasks ADD COLUMN resolution_json TEXT')
+      this.db.prepare('INSERT INTO schema_migrations(version) VALUES (3)').run()
     }
     this.db.prepare(`UPDATE tasks SET status = 'paused', message = '应用上次退出，任务已暂停' WHERE status IN ('resolving','queued','downloading','converting')`).run()
   }
@@ -94,6 +105,16 @@ export class AppDatabase {
   saveArtwork(artwork: PixivArtwork): void {
     this.db.prepare(`INSERT INTO artworks(id,json,updated_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json,updated_at=excluded.updated_at`).run(artwork.id, JSON.stringify(artwork), new Date().toISOString())
   }
+  getResolution(taskId: string): unknown | undefined {
+    const row = this.db.prepare('SELECT resolution_json FROM tasks WHERE id=?').get(taskId) as { resolution_json: string | null } | undefined
+    return row?.resolution_json ? JSON.parse(row.resolution_json) : undefined
+  }
+  setResolution(taskId: string, value: unknown): void {
+    this.db.prepare('UPDATE tasks SET resolution_json=?,updated_at=? WHERE id=?').run(JSON.stringify(value), new Date().toISOString(), taskId)
+  }
+  clearResolution(taskId: string): void {
+    this.db.prepare('UPDATE tasks SET resolution_json=NULL,updated_at=? WHERE id=?').run(new Date().toISOString(), taskId)
+  }
   getArtwork(id: string): PixivArtwork | undefined {
     const row = this.db.prepare('SELECT json FROM artworks WHERE id=?').get(id) as { json: string } | undefined
     return row ? JSON.parse(row.json) as PixivArtwork : undefined
@@ -106,6 +127,22 @@ export class AppDatabase {
   hasFile(artworkId: string, page: number, format: string, path: string, size: number): boolean {
     const row = this.db.prepare('SELECT path,size FROM files WHERE artwork_id=? AND page_index=? AND format=?').get(artworkId, page, format) as { path: string; size: number } | undefined
     return row?.path === path && row.size === size
+  }
+  recordTaskFile(taskId: string, artworkId: string, page: number, format: string, path: string, size: number): void {
+    this.db.prepare(`INSERT INTO task_files(task_id,artwork_id,page_index,format,path,size,completed_at) VALUES(?,?,?,?,?,?,?)
+      ON CONFLICT(task_id,artwork_id,page_index,format) DO UPDATE SET path=excluded.path,size=excluded.size,completed_at=excluded.completed_at`).run(
+      taskId, artworkId, page, format, path, size, new Date().toISOString())
+  }
+  hasTaskFile(taskId: string, artworkId: string, page: number, format: string, path: string, size: number): boolean {
+    const row = this.db.prepare('SELECT path,size FROM task_files WHERE task_id=? AND artwork_id=? AND page_index=? AND format=?')
+      .get(taskId, artworkId, page, format) as { path: string; size: number } | undefined
+    return row?.path === path && row.size === size
+  }
+  itemCounts(taskId: string): { total: number; completed: number; failed: number } {
+    const row = this.db.prepare(`SELECT COUNT(*) AS total,
+      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed FROM task_items WHERE task_id=?`).get(taskId) as Record<string, number | null>
+    return { total: Number(row.total ?? 0), completed: Number(row.completed ?? 0), failed: Number(row.failed ?? 0) }
   }
   close(): void { this.db.close() }
 

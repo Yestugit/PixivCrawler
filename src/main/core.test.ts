@@ -24,7 +24,7 @@ const artwork: PixivArtwork = {
 
 describe('core persistence and filtering', () => {
   it('validates keyword search sources and result limits', () => {
-    expect(SourceSchema.parse({ kind: 'search', value: '风景' })).toMatchObject({ maxImages: 100 })
+    expect(SourceSchema.parse({ kind: 'search', value: '风景' })).toMatchObject({ maxImages: 100, strategy: 'newest' })
     expect(() => SourceSchema.parse({ kind: 'search', value: '', maxImages: 100 })).toThrow()
     expect(() => SourceSchema.parse({ kind: 'search', value: '风景', maxImages: 101 })).toThrow()
   })

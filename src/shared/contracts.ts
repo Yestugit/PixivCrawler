@@ -8,7 +8,11 @@ export type TaskStatus = z.infer<typeof TaskStatusSchema>
 
 export const SourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('artworks'), values: z.array(z.string()).min(1) }),
-  z.object({ kind: z.literal('search'), value: z.string().trim().min(1).max(500), maxImages: z.number().int().min(1).max(100).default(100) }),
+  z.object({
+    kind: z.literal('search'), value: z.string().trim().min(1).max(500),
+    maxImages: z.number().int().min(1).max(100).default(100),
+    strategy: z.enum(['balanced', 'newest', 'oldest']).default('newest')
+  }),
   z.object({ kind: z.literal('author'), value: z.string().min(1) }),
   z.object({ kind: z.literal('bookmarks') })
 ])

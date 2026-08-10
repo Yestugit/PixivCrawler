@@ -87,13 +87,14 @@ function CreateTask({ auth, onCreated, onError }: { auth: AuthStatus; onCreated(
   const [kind, setKind] = useState<DownloadSource['kind']>('artworks')
   const [value, setValue] = useState('')
   const [maxImages, setMaxImages] = useState(100)
+  const [searchStrategy, setSearchStrategy] = useState<'balanced' | 'newest' | 'oldest'>('balanced')
   const [filters, setFilters] = useState<DownloadFilter>(initialFilters)
   const [force, setForce] = useState(false)
   const [preview, setPreview] = useState<PreviewResult>()
   const [busy, setBusy] = useState(false)
   const input = useMemo<CreateTaskInput>(() => ({
-    source: kind === 'artworks' ? { kind, values: value.split(/\r?\n|,/).map((v) => v.trim()).filter(Boolean) } : kind === 'search' ? { kind, value: value.trim(), maxImages } : kind === 'author' ? { kind, value: value.trim() } : { kind }, filters, force
-  }), [kind, value, maxImages, filters, force])
+    source: kind === 'artworks' ? { kind, values: value.split(/\r?\n|,/).map((v) => v.trim()).filter(Boolean) } : kind === 'search' ? { kind, value: value.trim(), maxImages, strategy: searchStrategy } : kind === 'author' ? { kind, value: value.trim() } : { kind }, filters, force
+  }), [kind, value, maxImages, searchStrategy, filters, force])
   const execute = async (mode: 'preview' | 'create'): Promise<void> => {
     setBusy(true); onError('')
     try {
@@ -108,11 +109,12 @@ function CreateTask({ auth, onCreated, onError }: { auth: AuthStatus; onCreated(
     </div>
     {kind !== 'bookmarks' && <label>{kind === 'artworks' ? '作品链接或 ID（每行一个）' : kind === 'search' ? '主题、标签或 Pixiv 标签页链接' : '作者链接或 ID'}<textarea rows={kind === 'artworks' ? 5 : 2} value={value} onChange={(e) => setValue(e.target.value)} placeholder={kind === 'artworks' ? 'https://www.pixiv.net/artworks/123456' : kind === 'search' ? '例如：リコリス・リコイル、莉可丽丝，或粘贴 Pixiv 标签页链接' : 'https://www.pixiv.net/users/123456'} /></label>}
     {kind === 'search' && <div className="form-grid search-limits">
+      <label>候选检查方式<select value={searchStrategy} onChange={(e) => setSearchStrategy(e.target.value as typeof searchStrategy)}><option value="balanced">跨时间均衡（推荐）</option><option value="newest">最新优先</option><option value="oldest">最旧优先</option></select></label>
       <label>最多下载图片数<input type="number" min="1" max="100" value={maxImages} onChange={(e) => setMaxImages(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} /></label>
       <label>最低收藏数<input type="number" min="0" value={filters.minBookmarks} onChange={(e) => setFilters({ ...filters, minBookmarks: nonNegative(e.target.value) })} /></label>
       <label>最低浏览数<input type="number" min="0" value={filters.minViews} onChange={(e) => setFilters({ ...filters, minViews: nonNegative(e.target.value) })} /></label>
       <label>最低点赞数<input type="number" min="0" value={filters.minLikes} onChange={(e) => setFilters({ ...filters, minLikes: nonNegative(e.target.value) })} /></label>
-      <p className="field-help">热度筛选最多检查 500 个最新候选作品；数值越高，预览所需时间可能越长。</p>
+      <p className="field-help">最多检查 500 个候选。跨时间均衡会覆盖新、中、旧作品并优先检查摘要收藏数较高的候选；最新/最旧优先则严格按发布时间方向检查。</p>
     </div>}
     <h3>筛选条件</h3><div className="form-grid">
       <label>作品类型<div className="checks">{(['illust', 'manga', 'ugoira'] as const).map((type) => <label key={type}><input type="checkbox" checked={filters.types.includes(type)} onChange={() => setFilters({ ...filters, types: filters.types.includes(type) ? filters.types.filter((t) => t !== type) : [...filters.types, type] })} />{{ illust: '插画', manga: '漫画', ugoira: '动图' }[type]}</label>)}</div></label>
@@ -154,12 +156,12 @@ function AboutPage(): React.JSX.Element {
         <li><strong>登录 Pixiv</strong><span>点击左下角“登录”，在独立窗口中手动完成密码、验证码或两步验证。</span></li>
         <li><strong>新建下载任务</strong><span>选择作品链接、搜索作品、作者作品或我的收藏，并填写来源。</span></li>
         <li><strong>设置筛选条件</strong><span>可以按类型、日期、标签、AI 标记和年龄分级筛选；主题搜索还能设置最低收藏、浏览和点赞数，最多下载 100 张图片。</span></li>
-        <li><strong>预览并开始</strong><span>先检查匹配数量，再创建任务。任务支持暂停、继续、取消和失败重试。</span></li>
+        <li><strong>预览并开始</strong><span>先检查匹配数量，再创建任务。暂停会保存当前解析和文件字节进度；临时下载错误会自动重试 3 次。</span></li>
         <li><strong>查看文件</strong><span>在“设置”中查看或修改下载根目录；每个作品会保存图片和 artwork.json 元数据。</span></li>
       </ol>
       <h3>四种下载方式</h3><div className="about-grid">
         <article><strong>作品链接</strong><p>粘贴一个或多个作品链接/ID，适合精确下载。</p></article>
-        <article><strong>搜索作品</strong><p>输入主题、标签、中文译名，或直接粘贴 Pixiv 标签页链接。</p></article>
+        <article><strong>搜索作品</strong><p>输入主题、标签、中文译名或标签页链接，并选择跨时间均衡、最新优先或最旧优先。</p></article>
         <article><strong>作者作品</strong><p>输入作者主页链接/ID，批量归档筛选后的作品。</p></article>
         <article><strong>我的收藏</strong><p>归档当前账号的公开或非公开收藏。</p></article>
       </div>

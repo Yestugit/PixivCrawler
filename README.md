@@ -11,8 +11,8 @@ GitHub 项目主页与 Release 下载页。
 
 ## 下载
 
-- [下载安装版（Windows x64）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.2.1/PixivCrawler-0.2.1-x64.exe)
-- [下载免安装版（Windows x64 ZIP）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.2.1/PixivCrawler-0.2.1-x64.zip)
+- [下载安装版（Windows x64）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.2.2/PixivCrawler-0.2.2-x64.exe)
+- [下载免安装版（Windows x64 ZIP）](https://github.com/Yestugit/PixivCrawler/releases/download/v0.2.2/PixivCrawler-0.2.2-x64.zip)
 - [查看全部 Releases](https://github.com/Yestugit/PixivCrawler/releases)
 
 ## 开发
@@ -50,5 +50,7 @@ npm run package:win
   分别负责任务恢复/去重与开放归档元数据。
 - 默认最多 4 个在途请求、每 500ms 启动一个请求；搜索解析实时显示已检查候选和匹配图片数。
 - 遇到 429 会启用全局冷却并遵循 `Retry-After`，网络错误继续使用指数退避。
+- 搜索可选择跨时间均衡、最新优先或最旧优先；跨时间均衡会从不同时间段收集候选，更适合热度筛选。
+- 暂停会保存解析检查点、已完成页面和 `.part` 字节位置；临时下载错误会自动重试 3 次后再报告失败。
 
 本项目与 pixiv Inc. 无关。使用者应遵守 Pixiv 服务条款、作者权利和当地法律。
