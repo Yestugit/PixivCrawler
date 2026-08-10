@@ -22,8 +22,20 @@ const searchSchema = z.object({
     total: z.number()
   })
 })
+const searchCandidatesSchema = z.object({
+  candidates: z.array(z.object({
+    tag_name: z.string(), tag_translation: z.string().nullable().optional()
+  }))
+})
 
 export class PixivError extends Error { constructor(message: string, readonly code: 'auth' | 'not-found' | 'rate-limit' | 'adapter' | 'network') { super(message) } }
+
+export function pickTranslatedTag(word: string, candidates: { tag_name: string; tag_translation?: string | null }[]): string {
+  const normalized = word.toLocaleLowerCase()
+  const exact = candidates.find((candidate) =>
+    candidate.tag_name.toLocaleLowerCase() === normalized || candidate.tag_translation?.toLocaleLowerCase() === normalized)
+  return exact?.tag_name ?? word
+}
 
 export function matchesArtwork(work: PixivArtwork, filter: DownloadFilter): boolean {
   if (!filter.types.includes(work.type)) return false
@@ -110,8 +122,9 @@ export class PixivClient {
     return [...Object.keys(body.illusts ?? {}), ...Object.keys(body.manga ?? {})]
   }
   private async resolveSearch(input: string, maxImages: number, filters: DownloadFilter, signal?: AbortSignal): Promise<PixivArtwork[]> {
-    const word = parseSearchKeyword(input)
-    if (!word) throw new PixivError('请输入关键词或有效的 Pixiv 标签链接', 'adapter')
+    const parsedWord = parseSearchKeyword(input)
+    if (!parsedWord) throw new PixivError('请输入关键词或有效的 Pixiv 标签链接', 'adapter')
+    const word = await this.resolveTranslatedTag(parsedWord, signal)
     const encoded = encodeURIComponent(word)
     const results: PixivArtwork[] = []
     const seen = new Set<string>()
@@ -144,6 +157,11 @@ export class PixivClient {
     }
     return results
   }
+  private async resolveTranslatedTag(word: string, signal?: AbortSignal): Promise<string> {
+    const parsed = searchCandidatesSchema.safeParse(await this.getJson(`/rpc/cps.php?keyword=${encodeURIComponent(word)}&lang=zh`, signal))
+    if (!parsed.success) return word
+    return pickTranslatedTag(word, parsed.data.candidates)
+  }
   private async bookmarkIds(userId: string, visibility: 'show' | 'hide' | 'both', signal?: AbortSignal): Promise<string[]> {
     const ids: string[] = []
     const scopes = visibility === 'both' ? ['show', 'hide'] : [visibility]
@@ -158,6 +176,12 @@ export class PixivClient {
     return ids
   }
   private async getBody(path: string, signal?: AbortSignal): Promise<unknown> {
+    const envelope = ajaxSchema.safeParse(await this.getJson(path, signal))
+    if (!envelope.success) throw new PixivError('Pixiv 返回结构已变化，请更新站点适配器', 'adapter')
+    if (envelope.data.error) throw new PixivError(envelope.data.message || 'Pixiv 返回错误', 'adapter')
+    return envelope.data.body
+  }
+  private async getJson(path: string, signal?: AbortSignal): Promise<unknown> {
     for (let attempt = 0; attempt < 5; attempt++) {
       signal?.throwIfAborted()
       await this.pace(signal)
@@ -170,10 +194,7 @@ export class PixivClient {
           await sleep(retryDelay(attempt, response.status, response.headers.get('retry-after')), signal); continue
         }
         if (!response.ok) throw new PixivError(`Pixiv 请求失败（HTTP ${response.status}）`, 'network')
-        const envelope = ajaxSchema.safeParse(await response.json())
-        if (!envelope.success) throw new PixivError('Pixiv 返回结构已变化，请更新站点适配器', 'adapter')
-        if (envelope.data.error) throw new PixivError(envelope.data.message || 'Pixiv 返回错误', 'adapter')
-        return envelope.data.body
+        return await response.json()
       } catch (error) {
         if (error instanceof PixivError || signal?.aborted) throw error
         if (attempt === 4) throw new PixivError(error instanceof Error ? error.message : '网络连接失败', 'network')

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AppDatabase } from './database'
 import { buildUgoiraConcat } from './downloader'
-import { matchesArtwork } from './pixiv'
+import { matchesArtwork, pickTranslatedTag } from './pixiv'
 import type { CreateTaskInput, PixivArtwork } from '../shared/contracts'
 import { SourceSchema } from '../shared/contracts'
 
@@ -26,6 +26,11 @@ describe('core persistence and filtering', () => {
     expect(SourceSchema.parse({ kind: 'search', value: '风景' })).toMatchObject({ maxImages: 100 })
     expect(() => SourceSchema.parse({ kind: 'search', value: '', maxImages: 100 })).toThrow()
     expect(() => SourceSchema.parse({ kind: 'search', value: '风景', maxImages: 101 })).toThrow()
+  })
+  it('resolves an exact translated Pixiv tag without guessing unrelated candidates', () => {
+    const candidates = [{ tag_name: 'リコリス・リコイル', tag_translation: '莉可丽丝' }]
+    expect(pickTranslatedTag('莉可丽丝', candidates)).toBe('リコリス・リコイル')
+    expect(pickTranslatedTag('莉可', candidates)).toBe('莉可')
   })
   it('migrates the database and pauses interrupted work', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pixiv-crawler-')); temporary.push(dir)
